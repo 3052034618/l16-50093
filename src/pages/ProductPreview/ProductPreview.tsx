@@ -273,7 +273,18 @@ export default function ProductPreview() {
                                 'border-gray-100 bg-gray-50 opacity-40 cursor-not-allowed'
                             )}
                           >
-                            {value.colorHex && (
+                            {value.imageUrl ? (
+                              <img
+                                src={value.imageUrl}
+                                alt={value.value}
+                                className={cn(
+                                  'w-7 h-7 rounded-lg object-cover border transition-all',
+                                  isSelected
+                                    ? 'border-blue-600 scale-110 ring-2 ring-blue-200'
+                                    : 'border-gray-200'
+                                )}
+                              />
+                            ) : value.colorHex ? (
                               <div
                                 className={cn(
                                   'w-6 h-6 rounded-full border-2 transition-all',
@@ -283,7 +294,7 @@ export default function ProductPreview() {
                                 )}
                                 style={{ backgroundColor: value.colorHex }}
                               />
-                            )}
+                            ) : null}
                             <span
                               className={cn(
                                 'text-sm font-medium',

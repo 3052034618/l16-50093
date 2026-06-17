@@ -30,7 +30,10 @@ export default function AttributeConfig({ productId }: AttributeConfigProps) {
   const [editingValueId, setEditingValueId] = useState<string | null>(null);
   const [newValueName, setNewValueName] = useState('');
   const [newValueColor, setNewValueColor] = useState('#1e40af');
+  const [newValueImage, setNewValueImage] = useState('');
   const [addingValueDimId, setAddingValueDimId] = useState<string | null>(null);
+  const [settingImageValueId, setSettingImageValueId] = useState<string | null>(null);
+  const [tempImageUrl, setTempImageUrl] = useState('');
 
   const handleAddDimension = () => {
     if (!newDimName.trim()) return;
@@ -56,10 +59,20 @@ export default function AttributeConfig({ productId }: AttributeConfigProps) {
 
   const handleAddValue = (dimId: string) => {
     if (!newValueName.trim()) return;
-    addAttributeValue(dimId, newValueName.trim(), newValueColor);
+    addAttributeValue(dimId, newValueName.trim(), newValueColor, newValueImage);
     setNewValueName('');
+    setNewValueImage('');
     setAddingValueDimId(null);
     regenerateSkus(productId);
+  };
+
+  const handleImageUrlChange = (valueId: string, dimId: string, imageUrl: string) => {
+    const dim = dimensions.find((d) => d.id === dimId);
+    const value = dim?.values.find((v) => v.id === valueId);
+    if (value) {
+      updateAttributeValue(valueId, value.value, value.colorHex, imageUrl);
+      regenerateSkus(productId);
+    }
   };
 
   const handleUpdateValue = (valueId: string, dimId: string) => {
@@ -223,12 +236,18 @@ export default function AttributeConfig({ productId }: AttributeConfigProps) {
                             : 'border-gray-200 hover:border-blue-300 hover:shadow-sm'
                         )}
                       >
-                        {value.colorHex && (
+                        {value.imageUrl ? (
+                          <img
+                            src={value.imageUrl}
+                            alt={value.value}
+                            className="w-6 h-6 rounded object-cover border border-gray-200"
+                          />
+                        ) : value.colorHex ? (
                           <div
                             className="w-6 h-6 rounded-full border-2 border-white shadow-md"
                             style={{ backgroundColor: value.colorHex }}
                           />
-                        )}
+                        ) : null}
                         <span className="text-sm text-gray-700">{value.value}</span>
 
                         <div className="absolute -top-2 -right-2 hidden group-hover:flex items-center gap-0.5 bg-white border border-gray-200 rounded-full shadow-md p-0.5">
@@ -244,6 +263,16 @@ export default function AttributeConfig({ productId }: AttributeConfigProps) {
                             <Palette className="w-3 h-3" />
                           </label>
                           <button
+                            onClick={() => {
+                              setSettingImageValueId(value.id);
+                              setTempImageUrl(value.imageUrl || '');
+                            }}
+                            className="p-1 text-gray-500 hover:text-green-600"
+                            title="设置图片"
+                          >
+                            <Image className="w-3 h-3" />
+                          </button>
+                          <button
                             onClick={() => setEditingValueId(value.id)}
                             className="p-1 text-gray-500 hover:text-blue-600"
                           >
@@ -256,6 +285,59 @@ export default function AttributeConfig({ productId }: AttributeConfigProps) {
                             <Trash2 className="w-3 h-3" />
                           </button>
                         </div>
+
+                        {settingImageValueId === value.id && (
+                          <div className="absolute top-full right-0 mt-2 z-10 bg-white border border-gray-200 rounded-lg shadow-lg p-3 w-72">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="text-sm font-medium text-gray-700">属性值图片</span>
+                              <button
+                                onClick={() => setSettingImageValueId(null)}
+                                className="p-1 text-gray-400 hover:text-gray-600"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                            <div className="space-y-2">
+                              <input
+                                type="text"
+                                placeholder="输入图片URL"
+                                value={tempImageUrl}
+                                onChange={(e) => setTempImageUrl(e.target.value)}
+                                className="w-full px-2 py-1.5 border border-gray-200 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+                              />
+                              {tempImageUrl && (
+                                <img
+                                  src={tempImageUrl}
+                                  alt="预览"
+                                  className="w-full h-20 object-contain bg-gray-50 border border-gray-200 rounded"
+                                  onError={(e) => {
+                                    (e.target as HTMLImageElement).style.display = 'none';
+                                  }}
+                                />
+                              )}
+                              <div className="flex items-center gap-2">
+                                <button
+                                  onClick={() => {
+                                    handleImageUrlChange(value.id, dim.id, tempImageUrl.trim());
+                                    setSettingImageValueId(null);
+                                  }}
+                                  className="flex-1 px-2 py-1 bg-blue-600 text-white rounded text-xs font-medium hover:bg-blue-700 transition-colors"
+                                >
+                                  保存
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    handleImageUrlChange(value.id, dim.id, '');
+                                    setSettingImageValueId(null);
+                                  }}
+                                  className="px-2 py-1 bg-gray-100 text-gray-600 rounded text-xs font-medium hover:bg-gray-200 transition-colors"
+                                >
+                                  清除
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ))}
 
@@ -279,6 +361,16 @@ export default function AttributeConfig({ productId }: AttributeConfigProps) {
                           className="w-6 h-6 rounded cursor-pointer border-0"
                         />
                         <button
+                          onClick={() => {
+                            const url = window.prompt('输入图片URL（可选）', newValueImage);
+                            if (url !== null) setNewValueImage(url);
+                          }}
+                          className="p-1 text-gray-500 hover:text-green-600 hover:bg-green-50 rounded"
+                          title="设置图片"
+                        >
+                          <Image className="w-4 h-4" />
+                        </button>
+                        <button
                           onClick={() => handleAddValue(dim.id)}
                           className="p-1 text-green-600 hover:bg-green-100 rounded"
                         >
@@ -288,6 +380,7 @@ export default function AttributeConfig({ productId }: AttributeConfigProps) {
                           onClick={() => {
                             setAddingValueDimId(null);
                             setNewValueName('');
+                            setNewValueImage('');
                           }}
                           className="p-1 text-gray-400 hover:bg-gray-100 rounded"
                         >

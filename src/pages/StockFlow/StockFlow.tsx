@@ -10,11 +10,13 @@ import {
   TrendingUp,
   TrendingDown,
   Minus,
+  Hash,
+  ClipboardList,
 } from 'lucide-react';
 import { useProductStore } from '@/store/productStore';
 import { exportStockFlowToExcel } from '@/utils/excelExport';
 import { cn } from '@/lib/utils';
-import type { StockFlowType } from '@/types';
+import type { StockFlowType, StockAdjustReason } from '@/types';
 
 export default function StockFlow() {
   const { products, getStockFlows } = useProductStore();
@@ -84,6 +86,20 @@ export default function StockFlow() {
     if (type === 'in') return 'text-green-600 bg-green-50';
     if (type === 'out') return 'text-red-600 bg-red-50';
     return quantity >= 0 ? 'text-blue-600 bg-blue-50' : 'text-orange-600 bg-orange-50';
+  };
+
+  const getReasonLabel = (reason?: StockAdjustReason) => {
+    if (!reason) return '-';
+    const map: Record<StockAdjustReason, string> = {
+      purchase: '采购入库',
+      stocktake: '盘点调整',
+      replenish: '补货入库',
+      damage: '报损出库',
+      return: '退货入库',
+      transfer: '调拨',
+      other: '其他',
+    };
+    return map[reason] || reason;
   };
 
   const handleExport = () => {
@@ -217,6 +233,9 @@ export default function StockFlow() {
                   时间
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                  批次号
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
                   商品名称
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
@@ -224,6 +243,9 @@ export default function StockFlow() {
                 </th>
                 <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
                   类型
+                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">
+                  调整原因
                 </th>
                 <th className="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase tracking-wider">
                   变动数量
@@ -245,7 +267,7 @@ export default function StockFlow() {
             <tbody className="divide-y divide-gray-100">
               {flows.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-16 text-center text-gray-500">
+                  <td colSpan={11} className="px-4 py-16 text-center text-gray-500">
                     <Filter className="w-12 h-12 text-gray-300 mx-auto mb-3" />
                     <p>暂无库存流水记录</p>
                   </td>
@@ -263,6 +285,17 @@ export default function StockFlow() {
                       <div className="text-xs text-gray-400">
                         {new Date(flow.createdAt).toLocaleTimeString('zh-CN')}
                       </div>
+                    </td>
+
+                    <td className="px-4 py-3">
+                      {flow.batchNo ? (
+                        <span className="inline-flex items-center gap-1 text-xs font-mono text-purple-700 bg-purple-50 px-2 py-0.5 rounded">
+                          <Hash className="w-3 h-3" />
+                          {flow.batchNo}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-gray-300">-</span>
+                      )}
                     </td>
 
                     <td className="px-4 py-3">
@@ -287,6 +320,17 @@ export default function StockFlow() {
                         {getTypeIcon(flow.type)}
                         {getTypeLabel(flow.type)}
                       </span>
+                    </td>
+
+                    <td className="px-4 py-3">
+                      {flow.adjustReason ? (
+                        <span className="inline-flex items-center gap-1 text-xs text-gray-600 bg-gray-50 px-2 py-0.5 rounded">
+                          <ClipboardList className="w-3 h-3" />
+                          {getReasonLabel(flow.adjustReason)}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-gray-300">-</span>
+                      )}
                     </td>
 
                     <td
@@ -317,8 +361,8 @@ export default function StockFlow() {
                       </span>
                     </td>
 
-                    <td className="px-4 py-3">
-                      <span className="text-sm text-gray-500">
+                    <td className="px-4 py-3 max-w-[180px]">
+                      <span className="text-sm text-gray-500 line-clamp-1">
                         {flow.remark}
                       </span>
                     </td>

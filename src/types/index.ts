@@ -39,6 +39,14 @@ export interface Sku {
 }
 
 export type StockFlowType = 'in' | 'out' | 'adjust';
+export type StockAdjustReason =
+  | 'purchase'
+  | 'stocktake'
+  | 'replenish'
+  | 'damage'
+  | 'return'
+  | 'transfer'
+  | 'other';
 
 export interface StockFlow {
   id: string;
@@ -52,6 +60,8 @@ export interface StockFlow {
   operator: string;
   remark: string;
   createdAt: string;
+  adjustReason?: StockAdjustReason;
+  batchNo?: string;
 }
 
 export type WarningLevel = 'low' | 'medium' | 'high';
@@ -74,4 +84,19 @@ export interface SkuEditData {
   costPrice?: number;
   stock?: number;
   skuCode?: string;
+}
+
+export interface BatchCodeOptions {
+  prefix?: string;
+  startNumber?: number;
+  step?: number;
+  padLength?: number;
+  useAbbreviation?: boolean;
+  separator?: string;
+}
+
+export interface ImportResult {
+  success: number;
+  failed: number;
+  errors: Array<{ row: number; message: string }>;
 }
