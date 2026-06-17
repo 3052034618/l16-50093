@@ -2,14 +2,14 @@ import { useState, useMemo } from 'react';
 import {
   CheckSquare,
   Square,
-  Download,
   Save,
   Edit3,
   TrendingUp,
   AlertTriangle,
   X,
+  Hash,
 } from 'lucide-react';
-import type { Sku, AttributeDimension } from '@/types';
+import type { AttributeDimension } from '@/types';
 import { useProductStore } from '@/store/productStore';
 import { cn } from '@/lib/utils';
 
@@ -23,6 +23,7 @@ export default function SkuTable({ productId, dimensions }: SkuTableProps) {
     getSkusByProductId,
     updateSku,
     batchUpdateSkus,
+    batchGenerateSkuCodes,
     saveProductSkus,
     getWarningLevel,
   } = useProductStore();
@@ -35,6 +36,8 @@ export default function SkuTable({ productId, dimensions }: SkuTableProps) {
   const [batchValue, setBatchValue] = useState<string>('');
   const [editingCell, setEditingCell] = useState<{ skuId: string; field: string } | null>(null);
   const [editValue, setEditValue] = useState<string>('');
+  const [showCodeGen, setShowCodeGen] = useState(false);
+  const [codePrefix, setCodePrefix] = useState('');
 
   const allSelected = skus.length > 0 && selectedSkuIds.length === skus.length;
   const someSelected = selectedSkuIds.length > 0 && selectedSkuIds.length < skus.length;
@@ -92,9 +95,15 @@ export default function SkuTable({ productId, dimensions }: SkuTableProps) {
     setBatchValue('');
   };
 
+  const handleBatchCodeGen = () => {
+    if (!codePrefix.trim() || selectedSkuIds.length === 0) return;
+    batchGenerateSkuCodes(selectedSkuIds, codePrefix.trim());
+    setShowCodeGen(false);
+    setCodePrefix('');
+  };
+
   const handleSaveAll = () => {
     saveProductSkus(productId, '管理员');
-    alert('保存成功！库存变动记录已生成。');
   };
 
   const sortedDimensions = useMemo(
@@ -177,6 +186,22 @@ export default function SkuTable({ productId, dimensions }: SkuTableProps) {
             )}
 
             <button
+              onClick={() => setShowCodeGen(!showCodeGen)}
+              disabled={selectedSkuIds.length === 0}
+              className={cn(
+                'flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors',
+                selectedSkuIds.length === 0
+                  ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                  : showCodeGen
+                  ? 'bg-purple-600 text-white'
+                  : 'bg-purple-50 text-purple-700 hover:bg-purple-100'
+              )}
+            >
+              <Hash className="w-4 h-4" />
+              批量编码
+            </button>
+
+            <button
               onClick={handleSaveAll}
               className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 transition-colors shadow-sm"
             >
@@ -185,6 +210,54 @@ export default function SkuTable({ productId, dimensions }: SkuTableProps) {
             </button>
           </div>
         </div>
+
+        {showCodeGen && selectedSkuIds.length > 0 && (
+          <div className="mt-4 p-4 bg-purple-50 rounded-xl border border-purple-200">
+            <div className="flex items-center gap-3">
+              <Hash className="w-5 h-5 text-purple-600" />
+              <span className="text-sm font-medium text-purple-800">批量生成SKU编码</span>
+              <span className="text-xs text-purple-500">
+                将为选中的 {selectedSkuIds.length} 个SKU按前缀+序号生成编码
+              </span>
+            </div>
+            <div className="flex items-center gap-3 mt-3">
+              <input
+                type="text"
+                placeholder="输入编码前缀，如：TS、SH、BG"
+                value={codePrefix}
+                onChange={(e) => setCodePrefix(e.target.value.toUpperCase())}
+                className="flex-1 max-w-xs px-3 py-2 border border-purple-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 bg-white"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') handleBatchCodeGen();
+                }}
+              />
+              <span className="text-sm text-purple-600">
+                生成格式: <span className="font-mono font-medium">{codePrefix || 'XXX'}-0001</span> ~ <span className="font-mono font-medium">{codePrefix || 'XXX'}-{String(selectedSkuIds.length).padStart(4, '0')}</span>
+              </span>
+              <button
+                onClick={handleBatchCodeGen}
+                disabled={!codePrefix.trim()}
+                className={cn(
+                  'px-4 py-2 rounded-lg text-sm font-medium transition-colors',
+                  codePrefix.trim()
+                    ? 'bg-purple-600 text-white hover:bg-purple-700'
+                    : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                )}
+              >
+                生成编码
+              </button>
+              <button
+                onClick={() => {
+                  setShowCodeGen(false);
+                  setCodePrefix('');
+                }}
+                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="overflow-x-auto">
@@ -454,7 +527,7 @@ export default function SkuTable({ productId, dimensions }: SkuTableProps) {
             库存总价值 <span className="font-medium text-gray-700">¥{totalValue.toLocaleString()}</span>
           </div>
           <div className="text-sm text-gray-400">
-            点击单元格可直接编辑 · 支持批量操作
+            点击单元格可直接编辑 · 支持批量操作和编码生成
           </div>
         </div>
       )}

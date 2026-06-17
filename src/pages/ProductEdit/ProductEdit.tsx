@@ -38,7 +38,6 @@ export default function ProductEdit() {
   const handleSave = () => {
     if (!id) return;
     saveProductSkus(id, '管理员');
-    alert('保存成功！库存变动记录已生成。');
   };
 
   const handlePreview = () => {

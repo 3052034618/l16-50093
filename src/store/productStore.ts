@@ -16,12 +16,24 @@ import {
 } from '@/utils/mockData';
 import { generateSkuCombinations } from '@/utils/skuGenerator';
 
+const STORAGE_KEY = 'sku-management-store';
+
+interface SavedSkuSnapshot {
+  id: string;
+  stock: number;
+}
+
 interface ProductState {
   products: Product[];
   dimensions: AttributeDimension[];
   skus: Sku[];
   stockFlows: StockFlow[];
   stockWarnings: StockWarning[];
+  savedSkuSnapshots: Record<string, SavedSkuSnapshot[]>;
+  initialized: boolean;
+
+  initializeStore: () => void;
+  persistToStorage: () => void;
 
   getProductById: (id: string) => Product | undefined;
   getDimensionsByProductId: (productId: string) => AttributeDimension[];
@@ -48,6 +60,7 @@ interface ProductState {
   regenerateSkus: (productId: string) => void;
   updateSku: (skuId: string, data: Partial<Sku>) => void;
   batchUpdateSkus: (skuIds: string[], data: Partial<Sku>) => void;
+  batchGenerateSkuCodes: (skuIds: string[], prefix: string) => void;
 
   saveProductSkus: (productId: string, operator: string) => void;
 
@@ -66,12 +79,77 @@ interface ProductState {
 const generateId = () =>
   Math.random().toString(36).substring(2, 11) + Date.now().toString(36);
 
+function loadFromStorage(): Partial<ProductState> | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    return {
+      products: data.products || [],
+      dimensions: data.dimensions || [],
+      skus: data.skus || [],
+      stockFlows: data.stockFlows || [],
+      stockWarnings: data.stockWarnings || [],
+      savedSkuSnapshots: data.savedSkuSnapshots || {},
+    };
+  } catch {
+    return null;
+  }
+}
+
 export const useProductStore = create<ProductState>((set, get) => ({
-  products: mockProducts,
-  dimensions: mockDimensions,
-  skus: mockSkus,
-  stockFlows: mockStockFlows,
-  stockWarnings: mockStockWarnings,
+  products: [],
+  dimensions: [],
+  skus: [],
+  stockFlows: [],
+  stockWarnings: [],
+  savedSkuSnapshots: {},
+  initialized: false,
+
+  initializeStore: () => {
+    if (get().initialized) return;
+    const saved = loadFromStorage();
+    if (saved && saved.products && saved.products.length > 0) {
+      set({
+        ...saved,
+        initialized: true,
+      });
+    } else {
+      set({
+        products: mockProducts,
+        dimensions: mockDimensions,
+        skus: mockSkus,
+        stockFlows: mockStockFlows,
+        stockWarnings: mockStockWarnings,
+        savedSkuSnapshots: {
+          prod001: mockSkus
+            .filter((s) => s.productId === 'prod001')
+            .map((s) => ({ id: s.id, stock: s.stock })),
+          prod002: mockSkus
+            .filter((s) => s.productId === 'prod002')
+            .map((s) => ({ id: s.id, stock: s.stock })),
+          prod003: mockSkus
+            .filter((s) => s.productId === 'prod003')
+            .map((s) => ({ id: s.id, stock: s.stock })),
+          prod004: mockSkus
+            .filter((s) => s.productId === 'prod004')
+            .map((s) => ({ id: s.id, stock: s.stock })),
+        },
+        initialized: true,
+      });
+      get().persistToStorage();
+    }
+  },
+
+  persistToStorage: () => {
+    try {
+      const { products, dimensions, skus, stockFlows, stockWarnings, savedSkuSnapshots } = get();
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ products, dimensions, skus, stockFlows, stockWarnings, savedSkuSnapshots })
+      );
+    } catch {}
+  },
 
   getProductById: (id) => {
     return get().products.find((p) => p.id === id);
@@ -98,6 +176,7 @@ export const useProductStore = create<ProductState>((set, get) => ({
       values: [],
     };
     set({ dimensions: [...dimensions, newDimension] });
+    get().persistToStorage();
   },
 
   updateDimension: (dimensionId, name) => {
@@ -106,12 +185,14 @@ export const useProductStore = create<ProductState>((set, get) => ({
         d.id === dimensionId ? { ...d, name } : d
       ),
     }));
+    get().persistToStorage();
   },
 
   deleteDimension: (dimensionId) => {
     set((state) => ({
       dimensions: state.dimensions.filter((d) => d.id !== dimensionId),
     }));
+    get().persistToStorage();
   },
 
   addAttributeValue: (dimensionId, value, colorHex, imageUrl) => {
@@ -134,6 +215,7 @@ export const useProductStore = create<ProductState>((set, get) => ({
         };
       }),
     }));
+    get().persistToStorage();
   },
 
   updateAttributeValue: (valueId, value, colorHex, imageUrl) => {
@@ -145,6 +227,7 @@ export const useProductStore = create<ProductState>((set, get) => ({
         ),
       })),
     }));
+    get().persistToStorage();
   },
 
   deleteAttributeValue: (valueId) => {
@@ -154,6 +237,7 @@ export const useProductStore = create<ProductState>((set, get) => ({
         values: d.values.filter((v) => v.id !== valueId),
       })),
     }));
+    get().persistToStorage();
   },
 
   regenerateSkus: (productId) => {
@@ -165,15 +249,41 @@ export const useProductStore = create<ProductState>((set, get) => ({
     const newSkus = generateSkuCombinations(productId, dimensions);
 
     const mergedSkus = newSkus.map((newSku) => {
-      const existing = existingSkus.find((e) => {
-        const keys = Object.keys(e.attributes);
-        return keys.every(
+      const exactMatch = existingSkus.find((e) => {
+        const allKeys = new Set([
+          ...Object.keys(e.attributes),
+          ...Object.keys(newSku.attributes),
+        ]);
+        return [...allKeys].every(
           (k) => e.attributes[k] === newSku.attributes[k]
         );
       });
-      if (existing) {
-        return { ...existing, attributeLabels: newSku.attributeLabels };
+
+      if (exactMatch) {
+        return {
+          ...exactMatch,
+          attributeLabels: newSku.attributeLabels,
+        };
       }
+
+      const partialMatches = existingSkus.filter((e) => {
+        const commonKeys = Object.keys(e.attributes).filter((k) =>
+          k in newSku.attributes
+        );
+        if (commonKeys.length === 0) return false;
+        return commonKeys.every((k) => e.attributes[k] === newSku.attributes[k]);
+      });
+
+      if (partialMatches.length > 0) {
+        const best = partialMatches[0];
+        return {
+          ...newSku,
+          salePrice: best.salePrice,
+          costPrice: best.costPrice,
+          skuCode: best.skuCode,
+        };
+      }
+
       return newSku;
     });
 
@@ -183,6 +293,7 @@ export const useProductStore = create<ProductState>((set, get) => ({
         ...mergedSkus,
       ],
     }));
+    get().persistToStorage();
   },
 
   updateSku: (skuId, data) => {
@@ -191,6 +302,7 @@ export const useProductStore = create<ProductState>((set, get) => ({
         s.id === skuId ? { ...s, ...data } : s
       ),
     }));
+    get().persistToStorage();
   },
 
   batchUpdateSkus: (skuIds, data) => {
@@ -199,33 +311,85 @@ export const useProductStore = create<ProductState>((set, get) => ({
         skuIds.includes(s.id) ? { ...s, ...data } : s
       ),
     }));
+    get().persistToStorage();
+  },
+
+  batchGenerateSkuCodes: (skuIds, prefix) => {
+    const skus = get().skus;
+    const updated = skus.map((s) => {
+      if (!skuIds.includes(s.id)) return s;
+      const idx = skuIds.indexOf(s.id) + 1;
+      const suffix = String(idx).padStart(4, '0');
+      return { ...s, skuCode: `${prefix}-${suffix}` };
+    });
+    set({ skus: updated });
+    get().persistToStorage();
   },
 
   saveProductSkus: (productId, operator) => {
     const skus = get().skus.filter((s) => s.productId === productId);
     const product = get().products.find((p) => p.id === productId);
+    const savedSnapshots = get().savedSkuSnapshots[productId] || [];
 
-    const newFlows: StockFlow[] = skus
-      .filter((s) => s.stock > 0)
-      .map((sku) => ({
+    const newFlows: StockFlow[] = [];
+
+    skus.forEach((sku) => {
+      const saved = savedSnapshots.find((s) => s.id === sku.id);
+      const beforeStock = saved ? saved.stock : 0;
+
+      if (sku.stock === beforeStock) return;
+
+      const diff = sku.stock - beforeStock;
+      let type: 'in' | 'out' | 'adjust';
+      let remark: string;
+
+      if (beforeStock === 0 && sku.stock > 0) {
+        type = 'in';
+        remark = 'SKU库存初始化';
+      } else if (diff > 0) {
+        type = 'in';
+        remark = '库存增加';
+      } else if (diff < 0) {
+        type = 'out';
+        remark = '库存减少';
+      } else {
+        type = 'adjust';
+        remark = '库存调整';
+      }
+
+      newFlows.push({
         id: generateId(),
         skuId: sku.id,
         skuCode: sku.skuCode,
         productName: product?.name || '',
-        type: 'adjust' as const,
-        quantity: sku.stock,
-        beforeStock: 0,
+        type,
+        quantity: diff,
+        beforeStock,
         afterStock: sku.stock,
         operator,
-        remark: 'SKU库存初始化',
+        remark,
         createdAt: new Date().toISOString(),
-      }));
+      });
+    });
+
+    const newSnapshots = skus.map((s) => ({ id: s.id, stock: s.stock }));
 
     set((state) => ({
       stockFlows: [...newFlows, ...state.stockFlows],
+      savedSkuSnapshots: {
+        ...state.savedSkuSnapshots,
+        [productId]: newSnapshots,
+      },
     }));
 
     get().refreshWarnings();
+    get().persistToStorage();
+
+    if (newFlows.length > 0) {
+      alert(`保存成功！已记录 ${newFlows.length} 条库存变动。`);
+    } else {
+      alert('保存成功！无库存变动。');
+    }
   },
 
   getWarningLevel: (stock, threshold) => {
@@ -236,7 +400,14 @@ export const useProductStore = create<ProductState>((set, get) => ({
   },
 
   refreshWarnings: () => {
-    const { products, skus, getWarningLevel } = get();
+    const { products, skus, stockWarnings, getWarningLevel } = get();
+    const resolvedMap = new Map<string, boolean>();
+    stockWarnings.forEach((w) => {
+      if (w.resolved) {
+        resolvedMap.set(w.skuId, true);
+      }
+    });
+
     const warnings: StockWarning[] = [];
 
     skus.forEach((sku) => {
@@ -245,6 +416,7 @@ export const useProductStore = create<ProductState>((set, get) => ({
 
       const threshold = product.warningThreshold;
       if (sku.stock < threshold) {
+        const wasResolved = resolvedMap.get(sku.id) || false;
         warnings.push({
           id: generateId(),
           skuId: sku.id,
@@ -254,7 +426,7 @@ export const useProductStore = create<ProductState>((set, get) => ({
           currentStock: sku.stock,
           threshold,
           level: getWarningLevel(sku.stock, threshold),
-          resolved: false,
+          resolved: wasResolved,
           createdAt: new Date().toISOString(),
         });
       }
@@ -269,6 +441,7 @@ export const useProductStore = create<ProductState>((set, get) => ({
         w.id === warningId ? { ...w, resolved: true } : w
       ),
     }));
+    get().persistToStorage();
   },
 
   getStockFlows: (filters) => {
