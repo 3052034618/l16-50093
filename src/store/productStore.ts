@@ -305,11 +305,11 @@ export const useProductStore = create<ProductState>((set, get) => ({
   },
 
   regenerateSkus: (productId) => {
-    const dimensions = get()
+    const allDimensions = get()
       .dimensions.filter((d) => d.productId === productId)
       .sort((a, b) => a.sortOrder - b.sortOrder);
     const existingSkus = get().skus.filter((s) => s.productId === productId);
-    const newSkus = generateSkuCombinations(productId, dimensions);
+    const newSkus = generateSkuCombinations(productId, allDimensions);
 
     const existingDimIds = new Set(
       existingSkus.flatMap((s) => Object.keys(s.attributes))
@@ -320,35 +320,94 @@ export const useProductStore = create<ProductState>((set, get) => ({
     const commonDimIds = [...existingDimIds].filter((id) => newDimIds.has(id));
     const addedDimIds = [...newDimIds].filter((id) => !existingDimIds.has(id));
 
-    const mergedSkus = newSkus.map((newSku) => {
-      const exactMatch = existingSkus.find((e) => {
-        const allKeys = new Set([
-          ...Object.keys(e.attributes),
-          ...Object.keys(newSku.attributes),
-        ]);
-        return [...allKeys].every(
-          (k) => e.attributes[k] === newSku.attributes[k]
-        );
-      });
-      if (exactMatch) {
-        return { ...exactMatch, attributeLabels: newSku.attributeLabels };
-      }
+    // 构建每个新组合的唯一 key
+    const buildKey = (attrs: Record<string, string>, dims: string[]) =>
+      dims.map((d) => attrs[d] || '').join('||');
+    const allDimIdsSorted = allDimensions.map((d) => d.id);
 
-      if (commonDimIds.length > 0 && addedDimIds.length > 0) {
-        const matchOnOld = existingSkus.find((e) =>
-          commonDimIds.every((k) => e.attributes[k] === newSku.attributes[k])
-        );
-        if (matchOnOld) {
-          return {
-            ...newSku,
-            salePrice: matchOnOld.salePrice,
-            costPrice: matchOnOld.costPrice,
-            stock: matchOnOld.stock,
-            skuCode: matchOnOld.skuCode,
-          };
+    if (existingSkus.length === 0 || addedDimIds.length === 0) {
+      // 无历史数据或只是老维度内部删改值 → 精确匹配
+      const existingMap = new Map(
+        existingSkus.map((s) => [buildKey(s.attributes, allDimIdsSorted), s])
+      );
+      const mergedSkus = newSkus.map((newSku) => {
+        const key = buildKey(newSku.attributes, allDimIdsSorted);
+        const exact = existingMap.get(key);
+        if (exact) {
+          return { ...exact, attributeLabels: newSku.attributeLabels };
         }
+        return newSku;
+      });
+      set((state) => ({
+        skus: [
+          ...state.skus.filter((s) => s.productId !== productId),
+          ...mergedSkus,
+        ],
+      }));
+      get().persistToStorage();
+      return;
+    }
+
+    // ============== 有新增维度的场景：一一对应继承 ==============
+    // 1. 对每个新增维度，选出"默认值"（sortOrder 第一个 value）
+    const addedDimDefaultValue: Record<string, string> = {};
+    addedDimIds.forEach((dimId) => {
+      const dim = allDimensions.find((d) => d.id === dimId);
+      const firstValue = [...(dim?.values || [])].sort(
+        (a, b) => a.sortOrder - b.sortOrder
+      )[0];
+      if (firstValue) addedDimDefaultValue[dimId] = firstValue.id;
+    });
+
+    // 2. 为每个旧 SKU 计算它在新世界里唯一对应的目标组合：
+    //    旧属性值 拼上 每个新增维度的默认值
+    const oldSkuById = new Map(existingSkus.map((s) => [s.id, s]));
+    const oldSkuTargetKey = new Map<string, string>(); // oldSkuId → target combination key
+    const targetKeyToOldSkuId = new Map<string, string>(); // target key → oldSkuId
+
+    existingSkus.forEach((sku) => {
+      const mergedAttrs: Record<string, string> = { ...sku.attributes };
+      addedDimIds.forEach((dimId) => {
+        mergedAttrs[dimId] = addedDimDefaultValue[dimId] || '';
+      });
+      const targetKey = buildKey(mergedAttrs, allDimIdsSorted);
+      oldSkuTargetKey.set(sku.id, targetKey);
+      if (!targetKeyToOldSkuId.has(targetKey)) {
+        targetKeyToOldSkuId.set(targetKey, sku.id);
+      }
+    });
+
+    // 3. 构造精确匹配 Map（处理无新增维度但属性有改动的极端情况）
+    const exactMap = new Map(
+      existingSkus.map((s) => [buildKey(s.attributes, allDimIdsSorted), s])
+    );
+
+    // 4. 遍历新组合，一一匹配
+    const usedOldSkuIds = new Set<string>();
+    const mergedSkus = newSkus.map((newSku) => {
+      const key = buildKey(newSku.attributes, allDimIdsSorted);
+
+      // a) 精确匹配（老维度没变、没改值的场景）
+      if (exactMap.has(key)) {
+        usedOldSkuIds.add(exactMap.get(key)!.id);
+        return { ...exactMap.get(key)!, attributeLabels: newSku.attributeLabels };
       }
 
+      // b) 这个新组合恰好是某个旧 SKU 映射过来的唯一目标组合
+      const matchedOldId = targetKeyToOldSkuId.get(key);
+      if (matchedOldId && !usedOldSkuIds.has(matchedOldId)) {
+        const oldSku = oldSkuById.get(matchedOldId)!;
+        usedOldSkuIds.add(matchedOldId);
+        return {
+          ...newSku,
+          salePrice: oldSku.salePrice,
+          costPrice: oldSku.costPrice,
+          stock: oldSku.stock,
+          skuCode: oldSku.skuCode,
+        };
+      }
+
+      // c) 完全是新组合（比如新增维度上取了非默认值）→ 使用默认库存初始化
       return newSku;
     });
 

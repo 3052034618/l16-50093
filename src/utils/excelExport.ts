@@ -8,7 +8,16 @@ export function exportSkusToExcel(
 ): void {
   const dimensionNames = dimensions.map((d) => d.name);
 
-  const data = skus.map((sku, index) => {
+  const seenCodes = new Set<string>();
+  const uniqueSkus: Sku[] = [];
+  for (const sku of skus) {
+    if (!sku.skuCode || !seenCodes.has(sku.skuCode)) {
+      if (sku.skuCode) seenCodes.add(sku.skuCode);
+      uniqueSkus.push(sku);
+    }
+  }
+
+  const data = uniqueSkus.map((sku, index) => {
     const row: Record<string, string | number> = {
       序号: index + 1,
       商品编码: sku.skuCode,
@@ -43,17 +52,17 @@ export function exportSkusToExcel(
   XLSX.utils.book_append_sheet(workbook, worksheet, 'SKU列表');
 
   const summaryData = [
-    { 统计项: 'SKU总数', 数值: skus.length },
-    { 统计项: '总库存量', 数值: skus.reduce((sum, s) => sum + s.stock, 0) },
+    { 统计项: 'SKU总数', 数值: uniqueSkus.length },
+    { 统计项: '总库存量', 数值: uniqueSkus.reduce((sum, s) => sum + s.stock, 0) },
     {
       统计项: '库存总金额(元)',
-      数值: skus.reduce((sum, s) => sum + s.stock * s.costPrice, 0),
+      数值: uniqueSkus.reduce((sum, s) => sum + s.stock * s.costPrice, 0),
     },
     {
       统计项: '平均售价(元)',
       数值:
-        skus.length > 0
-          ? Math.round((skus.reduce((sum, s) => sum + s.salePrice, 0) / skus.length) * 100) /
+        uniqueSkus.length > 0
+          ? Math.round((uniqueSkus.reduce((sum, s) => sum + s.salePrice, 0) / uniqueSkus.length) * 100) /
             100
           : 0,
     },
